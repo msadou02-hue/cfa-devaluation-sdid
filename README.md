@@ -108,10 +108,6 @@ nothing needs downloading by hand. The outcome is real GDP growth,
 - The case-study text mentioned export growth while the code uses GDP growth; the code and this
   README use GDP growth throughout.
 
-Because of these corrections, the estimates differ from the PDF in `docs/`, which reports DiD
-+0.66, SC +0.85 and SDID +0.71 pp from the first version of the code. The results in this README
-are the corrected ones.
-
 ## References
 
 - Arkhangelsky, D., Athey, S., Hirshberg, D. A., Imbens, G. W., & Wager, S. (2021). Synthetic
