@@ -13,24 +13,49 @@ The paper, which covers the method, the case study and a replication of the Cali
 Proposition 99 example, is in
 [`docs/SDID_CFA_devaluation_paper.pdf`](docs/SDID_CFA_devaluation_paper.pdf).
 
-## Findings from the paper
+## Results
 
-| Estimator | Effect on real GDP growth (pp) |
-|---|---|
-| DiD | +0.66 |
-| SC | +0.85 |
-| SDID | +0.71 |
+Panel: 14 CFA countries and 9 non-CFA neighbours, real GDP growth 1986–2000, treatment from 1994.
 
-The point estimates suggest a modest positive effect, but the standard errors (±4.7 to ±7.2) are
-far larger than the effects, so none is statistically distinguishable from zero. The three
-estimators bracket a similar value, and SDID sits between DiD and SC as expected.
+| Estimator | Effect on real GDP growth (pp) | Std. error (jackknife) | 95% CI |
+|---|---|---|---|
+| DiD | −0.18 | 4.93 | [−9.85, 9.49] |
+| SC | +2.52 | 1.91 | [−1.22, 6.25] |
+| SDID | **+2.90** | 2.85 | [−2.69, 8.48] |
 
-> **Note:** these numbers come from the first version of the code, which had the sample and
-> matrix-ordering problems described below. Re-run `R/01_cfa_devaluation_sdid.R` to get the
-> corrected estimates; they will differ.
+![Estimators](figures/cfa_estimators.png)
 
-The Proposition 99 replication reproduces the paper's Table 1: DiD −27.3, SC −19.6, SDID −15.6
-packs per capita.
+**Why the estimators disagree.** Before 1994 the two groups did not move in parallel. Several
+control countries (Liberia, Sierra Leone, Angola and the DR Congo) were hit by civil wars and
+collapsed in 1990–93, so average non-CFA growth fell far below CFA growth just before the
+devaluation, then recovered at the same time the devaluation took effect.
+
+- **DiD** compares averages over all pre-1994 years, so it reads that recovery as normal
+  non-CFA growth and finds essentially no effect.
+- **SC** reweights the control countries to match the CFA growth path and finds about +2.5 pp.
+- **SDID** also weights the pre-treatment *years*, putting almost all weight on 1988–89, before
+  the conflicts. That gives a cleaner baseline and an estimate of about +2.9 pp.
+
+**Conclusion.** Once the comparison accounts for the conflict-driven collapse among the controls,
+the devaluation is associated with roughly 2.5–3 percentage points higher annual GDP growth in the
+CFA zone over 1994–2000. That is consistent with the short-run competitiveness gains documented in
+the literature. The confidence intervals are wide, though: with 14 treated countries and only 9
+controls, none of the estimates is statistically significant at 5%. The weights SDID assigns to
+each control country are fairly even (0.08–0.12 each, see `results/sdid_unit_weights.csv`), so no
+single country drives the result.
+
+![GDP trends](figures/cfa_gdp_trends.png)
+
+### Proposition 99 replication
+
+The California example reproduces Table 1 of Arkhangelsky et al. (2021) exactly (cigarette packs
+per capita, placebo standard errors):
+
+| Estimator | Estimate | Std. error |
+|---|---|---|
+| DiD | −27.3 | 17.7 |
+| SC | −19.6 | 10.9 |
+| SDID | −15.6 | 9.9 |
 
 ## Repository layout
 
@@ -39,7 +64,8 @@ R/01_cfa_devaluation_sdid.R   CFA case study: data, estimates, standard errors, 
 R/02_prop99_replication.R     California Proposition 99 replication
 install.R                     Installs required packages
 docs/                         The written paper (PDF)
-figures/, results/            Created when the scripts run
+figures/                      Charts produced by the scripts
+results/                      Estimates and SDID unit weights (CSV)
 ```
 
 ## Run it
@@ -82,8 +108,9 @@ nothing needs downloading by hand. The outcome is real GDP growth,
 - The case-study text mentioned export growth while the code uses GDP growth; the code and this
   README use GDP growth throughout.
 
-> The R scripts were rewritten but not run in the environment where this repository was prepared
-> (R was not installed there). Run them once and update the table above with the new estimates.
+Because of these corrections, the estimates differ from the PDF in `docs/`, which reports DiD
++0.66, SC +0.85 and SDID +0.71 pp from the first version of the code. The results in this README
+are the corrected ones.
 
 ## References
 

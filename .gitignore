@@ -4,5 +4,3 @@
 .Rdata
 .httr-oauth
 *_cache/
-figures/
-results/
