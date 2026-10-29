@@ -63,6 +63,7 @@ per capita, placebo standard errors):
 R/01_cfa_devaluation_sdid.R   CFA case study: data, estimates, standard errors, figures
 R/02_prop99_replication.R     California Proposition 99 replication
 install.R                     Installs required packages
+paper/                        R Markdown source of the paper (runs the analysis)
 docs/                         The written paper (PDF)
 figures/                      Charts produced by the scripts
 results/                      Estimates and SDID unit weights (CSV)
@@ -82,6 +83,12 @@ Rscript R/01_cfa_devaluation_sdid.R
 
 ```bash
 Rscript R/02_prop99_replication.R
+```
+
+To rebuild the paper PDF (needs `rmarkdown` and a LaTeX installation such as TinyTeX):
+
+```bash
+Rscript -e "rmarkdown::render('paper/SDID_CFA_devaluation_paper.Rmd', output_dir = 'docs')"
 ```
 
 Data come from Penn World Table 10.0 via the `pwt10` package (Feenstra, Inklaar & Timmer, 2015);

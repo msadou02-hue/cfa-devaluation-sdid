@@ -1,0 +1,450 @@
+---
+output:
+  pdf_document:
+    number_sections: false
+    fig_caption: true
+geometry: margin=1in
+fontsize: 11pt
+header-includes:
+  - \usepackage{booktabs}
+  - \usepackage{amsmath}
+  - \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 9, fig.height = 4.5, fig.align = "center", fig.pos = "H",
+                      out.width = "100%")
+set.seed(1994)
+```
+
+```{r analysis, include=FALSE}
+# Everything the text quotes is computed here, so the narrative always
+# matches the code shown later in the paper.
+suppressPackageStartupMessages({
+  library(dplyr); library(tidyr); library(ggplot2); library(pwt10); library(synthdid)
+})
+cfa_iso <- c("BEN", "BFA", "CIV", "GNB", "MLI", "NER", "SEN", "TGO",
+             "CMR", "CAF", "TCD", "COG", "GNQ", "GAB")
+control_iso <- c("GHA", "NGA", "LBR", "SLE", "GIN", "COD", "AGO", "GMB", "MRT")
+data("pwt10.0")
+df <- pwt10.0 %>%
+  filter(isocode %in% c(cfa_iso, control_iso), year >= 1985, year <= 2000) %>%
+  transmute(iso = as.character(isocode), country = as.character(country), year, rgdpna) %>%
+  arrange(iso, year) %>% group_by(iso) %>%
+  mutate(gdp_growth = 100 * (log(rgdpna) - log(lag(rgdpna)))) %>% ungroup() %>%
+  filter(!is.na(gdp_growth)) %>%
+  mutate(cfa = iso %in% cfa_iso, treated = as.integer(cfa & year >= 1994))
+n_years <- n_distinct(df$year)
+panel <- df %>% group_by(iso) %>% filter(n() == n_years) %>% ungroup()
+setup <- panel.matrices(as.data.frame(select(panel, country, year, gdp_growth, treated)),
+                        unit = "country", time = "year",
+                        outcome = "gdp_growth", treatment = "treated")
+est <- list(DiD = did_estimate(setup$Y, setup$N0, setup$T0),
+            SC = sc_estimate(setup$Y, setup$N0, setup$T0),
+            SDID = synthdid_estimate(setup$Y, setup$N0, setup$T0))
+tab <- bind_rows(lapply(names(est), function(nm) {
+  se <- sqrt(vcov(est[[nm]], method = "jackknife"))
+  tibble(Estimator = nm, Estimate = as.numeric(est[[nm]]), SE = as.numeric(se),
+         `CI low` = Estimate - 1.96 * SE, `CI high` = Estimate + 1.96 * SE)
+}))
+f <- function(x) sprintf("%+.2f", x)
+g <- function(x) sprintf("%.2f", x)
+e <- setNames(tab$Estimate, tab$Estimator)
+s <- setNames(tab$SE, tab$Estimator)
+n_tr <- n_distinct(panel$iso[panel$cfa]); n_co <- n_distinct(panel$iso[!panel$cfa])
+lambda <- attr(est$SDID, "weights")$lambda
+names(lambda) <- colnames(setup$Y)[seq_len(setup$T0)]
+top_years <- names(sort(lambda, decreasing = TRUE))[1:2]
+top_share <- sum(sort(lambda, decreasing = TRUE)[1:2])
+omega <- attr(est$SDID, "weights")$omega
+means <- panel %>% mutate(period = ifelse(year < 1994, "pre", "post")) %>%
+  group_by(cfa, period) %>% summarise(m = mean(gdp_growth), .groups = "drop")
+mval <- function(c, p) means$m[means$cfa == c & means$period == p]
+```
+
+\begin{center}
+{\LARGE\bfseries Work Sample Note}\\[1em]
+{\large Mahamane Bachir Sadou}
+\end{center}
+
+The attached paper applies the Synthetic Difference-in-Differences (SDID) method to evaluate the
+economic impact of the 1994 CFA franc devaluation across 14 West and Central African countries.
+The central question is whether the policy improved GDP growth in affected countries relative to a
+credible counterfactual.
+
+**What this sample demonstrates:**
+
+- **Data preparation and cleaning.** I constructed a `r n_tr + n_co`-country, `r n_years`-year
+  panel from the Penn World Table (PWT 10.0), matching countries by ISO code, computing
+  log-differenced GDP growth rates, and structuring the data into the matrix format required for
+  panel estimation.
+- **Quantitative analysis and method comparison.** I applied three estimators side by side
+  (Difference-in-Differences, Synthetic Control and SDID) and diagnosed why each produces a
+  different answer. Plain DiD finds essentially no effect (`r f(e["DiD"])` pp), because several
+  control countries collapsed in civil wars just before the devaluation. SC (`r f(e["SC"])` pp)
+  and SDID (`r f(e["SDID"])` pp) reweight the comparison to correct for this.
+- **Translation for broad audiences.** The paper is written to be accessible beyond
+  econometricians. Visualizations show group-level GDP trends before and after the devaluation,
+  and the discussion explains why methodological choice is itself a policy-relevant decision, not
+  merely a technical one.
+- **Substantive domain knowledge.** The CFA franc case draws on familiarity with West African
+  macroeconomic data and institutional context, developed during 14 years compiling national
+  accounts at Niger's National Institute of Statistics (INS Niger).
+
+**Key finding:**
+
+Once the comparison accounts for the conflict-driven collapse in several non-CFA countries, the
+1994 devaluation is associated with roughly 2.5 to 3 percentage points higher annual GDP growth in
+the CFA zone over 1994--2000. A naive DiD comparison misses this effect entirely. The estimates are
+imprecise, however: with `r n_tr` treated and only `r n_co` control countries, none of the
+confidence intervals excludes zero. This is consistent with the broader literature on the
+devaluation, which documents short-run competitiveness gains but uneven effects across member
+states.
+
+**Technical details:**
+
+Tools: R (dplyr, ggplot2, synthdid, pwt10)\
+Data source: Penn World Table 10.0 (Feenstra, Inklaar and Timmer, 2015)\
+Method: Arkhangelsky et al. (2021), Synthetic Difference-in-Differences\
+Code: <https://github.com/msadou02-hue/cfa-devaluation-sdid>
+
+\newpage
+
+\begin{center}
+{\LARGE\bfseries Causal Inference with Synthetic\\[0.3em] Difference-in-Differences}\\[1em]
+{\large Mahamane Bachir Sadou}
+\end{center}
+
+# 1. Introduction
+
+The paper *Synthetic Difference in Differences* by Dmitry Arkhangelsky, Susan Athey, David
+Hirshberg, Guido Imbens and Stefan Wager develops a novel estimator for evaluating causal effects
+using panel data in a setting where some units are exposed to the policy in some time periods but
+not others. The Synthetic Difference in Differences (SDID) method merges the logic of two popular
+frameworks:
+
+- **Difference-in-Differences (DiD):** assumes parallel trends for treated and control groups.
+- **Synthetic Control (SC):** builds a counterfactual for a treated unit from a weighted
+  combination of control units.
+
+SDID improves on each method's limitations, offering robustness, flexibility and improved
+performance across diverse empirical scenarios.
+
+# 2. Motivation and Context
+
+Causal inference in panel data settings often involves comparing treated and untreated units
+across time. This requires methods that can adjust for both observed and unobserved confounding
+and account for different pre-treatment trajectories. Two of the most widely used approaches are
+Difference-in-Differences (DiD) and Synthetic Control (SC). Each method has strengths and
+weaknesses that make them suitable for particular empirical scenarios but problematic in others.
+The SDID framework emerges from the motivation to reconcile these approaches and create a more
+robust estimator.
+
+## 2.1 Difference-in-Differences (DiD)
+
+Difference-in-Differences is a classical method for evaluating policy impacts when randomized
+experiments are not feasible. It compares the before-after difference in outcomes between treated
+and untreated groups. The identifying assumption is that, absent treatment, the average outcome
+trends of treated and control units would have moved in parallel over time.
+
+This parallel trends assumption is strong and often unverifiable. If the pre-treatment trends of
+the control group do not align well with those of the treated group, the DiD estimator may yield
+biased results. Moreover, DiD is typically implemented through a two-way fixed effects
+regression, which assumes additive separability of unit and time effects. In practice, this
+assumption may not hold, particularly in settings with complex time-varying confounding or when
+treatment is assigned non-randomly.
+
+## 2.2 Synthetic Control (SC)
+
+The Synthetic Control method addresses some of DiD's shortcomings by explicitly constructing a
+counterfactual for treated units. This counterfactual is a weighted average of untreated units,
+where the weights are chosen to match the pre-treatment trajectory of the treated unit(s) as
+closely as possible. SC is most commonly used when only a small number of units are treated,
+often just one.
+
+While SC improves the credibility of counterfactual comparisons by closely matching trends, it
+introduces new challenges. The method does not easily accommodate statistical inference using
+conventional tools. Additionally, SC is sensitive to the selection of pre-treatment periods and
+can produce unstable estimates if pre-treatment fit is poor or if the donor pool lacks
+appropriate comparators.
+
+## 2.3 SDID: Combining Strengths
+
+The SDID estimator blends the philosophies of DiD and SC. It retains the regression-based
+framework of DiD, which enables straightforward implementation and inference, but augments it
+with the synthetic matching feature of SC.
+
+Specifically, SDID introduces unit and time weights to balance pre-treatment trajectories across
+units and periods. The unit weights ensure that treated units are compared to similar control
+units, akin to SC. The time weights emphasize the comparison of time periods with similar
+dynamics, mitigating bias from unusual time shocks.
+
+This combination allows SDID to:
+
+- reduce reliance on the strong parallel trends assumption by reweighting to create parallelism
+  in expectation;
+- provide valid statistical inference through regression techniques;
+- generalize to settings with staggered or group-level treatment;
+- improve estimation precision by emphasizing informative comparisons.
+
+In essence, SDID formalizes what researchers often do informally, adjusting data to satisfy
+assumptions before applying DiD. By automating this process through a principled weighting
+scheme, SDID achieves greater transparency and robustness.
+
+# 3. Methodology
+
+## 3.1 Setup and Notation
+
+Let $i = 1, \dots, N$ index units and $t = 1, \dots, T$ index time periods. $Y_{it}$ is the
+observed outcome and $W_{it} \in \{0, 1\}$ the treatment indicator. The first $N_{co}$ units are
+controls and the remaining $N_{tr} = N - N_{co}$ are treated; treatment starts after period
+$T_{pre}$, leaving $T_{post} = T - T_{pre}$ post-treatment periods. $\mu$ is the grand mean,
+$\alpha_i$ the unit fixed effects and $\beta_t$ the time fixed effects.
+
+## 3.2 SDID Estimator
+
+The SDID estimate is obtained by solving a weighted two-way fixed effects regression:
+
+$$
+\left(\hat\tau^{sdid}, \hat\mu, \hat\alpha, \hat\beta\right) =
+\arg\min_{\tau, \mu, \alpha, \beta} \sum_{i=1}^{N} \sum_{t=1}^{T}
+\left(Y_{it} - \mu - \alpha_i - \beta_t - W_{it}\tau\right)^2 \hat\omega_i \hat\lambda_t
+$$
+
+DiD is the special case with equal weights for all units and periods; SC corresponds to dropping
+the unit fixed effects and the time weights.
+
+## 3.3 Weighting Strategy
+
+**Unit weights** $\hat\omega$ are chosen so that the weighted control units track the average
+treated unit before treatment:
+
+$$
+\ell_{unit}(\omega_0, \omega) = \sum_{t=1}^{T_{pre}}
+\left(\omega_0 + \sum_{i=1}^{N_{co}} \omega_i Y_{it} - \frac{1}{N_{tr}}
+\sum_{i=N_{co}+1}^{N} Y_{it}\right)^2 + \zeta^2 T_{pre} \lVert \omega \rVert_2^2
+$$
+
+**Time weights** $\hat\lambda$ balance pre- and post-treatment periods for the control units:
+
+$$
+\ell_{time}(\lambda_0, \lambda) = \sum_{i=1}^{N_{co}}
+\left(\lambda_0 + \sum_{t=1}^{T_{pre}} \lambda_t Y_{it} - \frac{1}{T_{post}}
+\sum_{t=T_{pre}+1}^{T} Y_{it}\right)^2
+$$
+
+Both sets of weights are non-negative and sum to one. The intercepts $\omega_0$ and $\lambda_0$
+allow for level differences, which the fixed effects then absorb.
+
+# 4. Case Study: CFA Franc Devaluation
+
+In this section, we apply SDID to the 1994 devaluation of the CFA franc. This shock affected 14
+African countries and provides a natural policy intervention to test causal inference methods. We
+examine real GDP growth, comparing SDID with DiD and SC.
+
+**Context.** The 1994 CFA franc devaluation was a major economic reform in which the value of the
+CFA franc was halved relative to the French franc. It affected all countries using the CFA franc,
+in West and Central Africa, with the goal of improving external competitiveness by boosting
+exports and reducing trade imbalances.
+
+This natural experiment lends itself well to SDID because:
+
+- it has a clear treatment timing (January 1994);
+- the treated units are well defined: the countries of the CFA franc zone;
+- suitable control countries exist in West and Central Africa that were not part of the CFA zone;
+- longitudinal macroeconomic data (1985--2000) are available for both treated and control
+  countries.
+
+We construct a panel of real GDP growth for these countries and estimate the effect of the
+devaluation using DiD, SC and SDID.
+
+## Data Preparation
+
+Countries are matched by ISO code rather than by name, because the Penn World Table spells
+several names differently (for example "Congo" for the Republic of Congo). Matching on names
+silently drops those countries.
+
+```{r data-prep, eval=FALSE}
+library(dplyr); library(ggplot2); library(pwt10); library(synthdid)
+
+# CFA zone: WAEMU (West Africa) and CEMAC (Central Africa)
+cfa_iso <- c("BEN", "BFA", "CIV", "GNB", "MLI", "NER", "SEN", "TGO",
+             "CMR", "CAF", "TCD", "COG", "GNQ", "GAB")
+# Neighbouring non-CFA economies
+control_iso <- c("GHA", "NGA", "LBR", "SLE", "GIN", "COD",
+                 "AGO", "GMB", "MRT")
+
+data("pwt10.0")
+df <- pwt10.0 %>%
+  filter(isocode %in% c(cfa_iso, control_iso), year >= 1985, year <= 2000) %>%
+  transmute(iso = as.character(isocode), country = as.character(country),
+            year, rgdpna) %>%
+  arrange(iso, year) %>%
+  group_by(iso) %>%
+  mutate(gdp_growth = 100 * (log(rgdpna) - log(lag(rgdpna)))) %>%
+  ungroup() %>%
+  filter(!is.na(gdp_growth)) %>%
+  mutate(cfa = iso %in% cfa_iso,
+         treated = as.integer(cfa & year >= 1994))
+
+# Keep a balanced panel
+panel <- df %>% group_by(iso) %>% filter(n() == n_distinct(df$year)) %>% ungroup()
+```
+
+`synthdid` requires the outcome matrix to list control units first and treated units last.
+`panel.matrices()` builds the matrix in that order and labels its rows and columns:
+
+```{r matrices, eval=FALSE}
+panel_df <- as.data.frame(select(panel, country, year, gdp_growth, treated))
+setup <- panel.matrices(panel_df, unit = "country", time = "year",
+                        outcome = "gdp_growth", treatment = "treated")
+```
+
+```{r dims}
+dim(setup$Y)   # countries x years
+c(N0 = setup$N0, T0 = setup$T0)
+```
+
+The panel contains `r n_tr` CFA countries and `r n_co` controls observed over `r n_years` years
+(1986--2000), with `r setup$T0` pre-treatment years.
+
+## Visualize the Panel Structure
+
+```{r trends, fig.cap = "Real GDP growth by country (grey) and group averages."}
+group_avg <- panel %>%
+  group_by(year, group = ifelse(cfa, "CFA zone", "Non-CFA")) %>%
+  summarise(avg_growth = mean(gdp_growth), .groups = "drop")
+
+ggplot() +
+  geom_line(data = panel, aes(year, gdp_growth, group = country),
+            colour = "grey75", linewidth = 0.4) +
+  geom_line(data = group_avg, aes(year, avg_growth, colour = group), linewidth = 1.2) +
+  geom_vline(xintercept = 1993.5, linetype = "dashed") +
+  scale_colour_manual(values = c("CFA zone" = "#1f5aa6", "Non-CFA" = "#c0392b")) +
+  coord_cartesian(ylim = c(-20, 25)) +
+  labs(title = "Real GDP growth, 1986-2000",
+       subtitle = "Dashed line marks the January 1994 CFA franc devaluation",
+       x = NULL, y = "Real GDP growth (%)", colour = NULL) +
+  theme_minimal(base_size = 12) + theme(legend.position = "bottom")
+```
+
+The figure already shows the main identification problem. Before 1994 the two groups do not move
+in parallel: average non-CFA growth falls sharply in 1990--93, driven by civil wars in Liberia and
+Sierra Leone and conflict in Angola and the Democratic Republic of the Congo, and then recovers
+in the mid-1990s, at the same time as the devaluation.
+
+## Estimate Effects
+
+```{r estimates, eval=FALSE}
+did_est  <- did_estimate(setup$Y, setup$N0, setup$T0)
+sc_est   <- sc_estimate(setup$Y, setup$N0, setup$T0)
+sdid_est <- synthdid_estimate(setup$Y, setup$N0, setup$T0)
+
+# Jackknife standard errors (leave one country out). Placebo standard errors
+# are not available because there are more treated than control countries.
+se <- sapply(list(did_est, sc_est, sdid_est),
+             function(x) sqrt(vcov(x, method = "jackknife")))
+```
+
+```{r results-table, echo=FALSE}
+knitr::kable(tab, digits = 2, booktabs = TRUE,
+             caption = "Estimated effect of the devaluation on real GDP growth (percentage points), with jackknife standard errors and 95\\% confidence intervals.")
+```
+
+```{r estimator-plot, echo=FALSE, fig.height=4.2, fig.cap="Treated and synthetic control trajectories for each estimator. Shaded areas at the bottom show the time weights; arrows show the estimated effect."}
+synthdid_plot(est, se.method = "jackknife", facet.vertical = FALSE) +
+  labs(y = "Real GDP growth (%)")
+```
+
+## Why the Estimators Disagree
+
+- **DiD (`r f(e["DiD"])` pp).** DiD weights all countries and all pre-treatment years equally.
+  Because non-CFA growth was depressed by conflict in 1990--93 and then recovered, the control
+  group's improvement after 1994 is as large as the CFA zone's, and DiD finds essentially no
+  effect.
+- **SC (`r f(e["SC"])` pp).** SC reweights the control countries so that their combined growth
+  path tracks the CFA zone before 1994, which removes much of the distortion.
+- **SDID (`r f(e["SDID"])` pp).** SDID also reweights the pre-treatment *years*. It places
+  `r round(100 * top_share)`% of the time weight on `r paste(sort(top_years), collapse = " and ")`,
+  before the conflicts, so the baseline is a period when both groups were growing normally. The
+  unit weights are close to equal (between `r g(min(omega))` and `r g(max(omega))`), so no single
+  control country drives the result.
+
+```{r period-means, echo=FALSE, fig.width=7, fig.height=3.8, out.width="75%", fig.cap="Average real GDP growth before and after the devaluation."}
+period_avg <- panel %>%
+  mutate(period = factor(ifelse(year < 1994, "1986-1993", "1994-2000"),
+                         levels = c("1986-1993", "1994-2000")),
+         group = ifelse(cfa, "CFA zone", "Non-CFA")) %>%
+  group_by(group, period) %>%
+  summarise(mean_growth = mean(gdp_growth), .groups = "drop")
+ggplot(period_avg, aes(period, mean_growth, fill = group)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("CFA zone" = "#1f5aa6", "Non-CFA" = "#c0392b")) +
+  labs(x = NULL, y = "Average growth (%)", fill = NULL) +
+  theme_minimal(base_size = 12)
+```
+
+The simple averages illustrate the same point. CFA growth rose from `r g(mval(TRUE, "pre"))`%
+to `r g(mval(TRUE, "post"))`% a year, but non-CFA growth rose by a similar amount, from
+`r g(mval(FALSE, "pre"))`% to `r g(mval(FALSE, "post"))`%, largely as a recovery from conflict
+rather than as a counterfactual for the CFA zone.
+
+# 5. Example from the Paper: California Proposition 99
+
+To illustrate SDID on a well-known benchmark, we replicate the case used in Arkhangelsky et al.
+(2021): California's Proposition 99, a 1989 anti-smoking law that significantly raised cigarette
+taxes and imposed new restrictions. We compare California's cigarette consumption before and after
+1989 with a counterfactual built from other U.S. states that did not adopt similar policies.
+
+```{r prop99}
+data("california_prop99")
+setup99 <- panel.matrices(california_prop99)
+
+est99 <- list(DiD  = did_estimate(setup99$Y, setup99$N0, setup99$T0),
+              SC   = sc_estimate(setup99$Y, setup99$N0, setup99$T0),
+              SDID = synthdid_estimate(setup99$Y, setup99$N0, setup99$T0))
+round(sapply(est99, as.numeric), 2)
+```
+
+```{r prop99-plot, echo=FALSE, fig.height=4, fig.cap="Proposition 99: California versus its synthetic counterfactual."}
+synthdid_plot(est99$SDID, overlay = 0) + labs(y = "Packs per capita")
+```
+
+The estimates reproduce Table 1 of the original paper. SDID gives a smaller and more credible
+effect than DiD because it matches California's pre-1989 trajectory before comparing changes.
+
+# 6. Discussion
+
+The SDID approach provides advantages in cases where traditional DiD fails to balance
+pre-treatment trends. The CFA application is a clear example. The control countries' growth path
+before 1994 was distorted by civil wars, so the parallel trends assumption fails and plain DiD
+finds no effect at all. SC and SDID, which reweight countries (and, for SDID, years) to build a
+comparable baseline, both point to a positive effect of about 2.5 to 3 percentage points of annual
+GDP growth.
+
+The choice of method is therefore not a technical detail: it determines whether the evaluation
+concludes that the devaluation did nothing or that it substantially supported growth. The
+uncertainty is large, however. With `r n_tr` treated countries and only `r n_co` controls, the
+jackknife standard errors are between `r g(min(s))` and `r g(max(s))` percentage points and none
+of the estimates is statistically significant at the 5% level.
+
+# 7. Conclusion
+
+SDID is a powerful causal inference tool for policy evaluation with panel data. By combining
+reweighted outcomes with fixed effects, it supports more credible identification under weaker
+assumptions than DiD. Applied to the CFA franc devaluation, it shows that accounting for
+pre-treatment differences changes the conclusion: the devaluation is associated with higher GDP
+growth in the CFA zone, an effect that a naive DiD comparison misses. A larger donor pool, or
+outcomes measured at a finer level, would be needed to estimate the effect precisely.
+
+# References
+
+- Arkhangelsky, D., Athey, S., Hirshberg, D. A., Imbens, G. W., & Wager, S. (2021). Synthetic
+  Difference-in-Differences. *American Economic Review*, 111(12), 4088--4118.
+- Abadie, A., Diamond, A., & Hainmueller, J. (2010). Synthetic Control Methods for Comparative
+  Case Studies. *Journal of the American Statistical Association*, 105(490), 493--505.
+- Bertrand, M., Duflo, E., & Mullainathan, S. (2004). How Much Should We Trust
+  Differences-in-Differences Estimates? *Quarterly Journal of Economics*, 119(1), 249--275.
+- Feenstra, R. C., Inklaar, R., & Timmer, M. P. (2015). The Next Generation of the Penn World
+  Table. *American Economic Review*, 105(10), 3150--3182.

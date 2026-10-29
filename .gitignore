@@ -4,3 +4,7 @@
 .Rdata
 .httr-oauth
 *_cache/
+paper/*.tex
+paper/*.log
+paper/*_files/
+paper/*.knit.md
